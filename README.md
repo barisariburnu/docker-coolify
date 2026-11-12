@@ -1,8 +1,8 @@
 # docker-coolify
 
-Docker Compose setup for self-hosted Coolify behind an existing Cloudflare Tunnel. Includes environment-based domains, loopback-only ingress, isolated PostgreSQL/Redis, and manual tunnel configuration.
+Mevcut Cloudflare Tunnel arkasında Coolify'ı Docker Compose ile çalıştıran kurulum. Alan adlarını ortam değişkenlerinden alır; dış trafiği yalnızca loopback üzerinden kabul eder, PostgreSQL/Redis ağını ayırır ve tünel kayıtları manuel yönetilir.
 
-Licensed under the [MIT License](LICENSE). Coolify, Traefik and the other upstream components retain their own licenses.
+[MIT lisansı](LICENSE) ile yayımlanır. Coolify, Traefik ve diğer bağımlılıklar kendi lisanslarına tabidir. README'nin açıklama dili Türkçedir; komutlar, değişkenler ve arayüz düğmeleri gerçek adlarıyla yazılır.
 
 Bu yapı, sunucuda çalışan cloudflared servisini kullanır. Trafik `Cloudflare → cloudflared → 127.0.0.1:18080 → Coolify proxy → uygulama` şeklinde ilerler. 80/443 portlarını kullanan diğer servislerle birlikte çalışabilir. Mevcut uygulamaların Coolify'a aktarılması ayrıca yapılır.
 
@@ -15,6 +15,7 @@ Bu yapı, sunucuda çalışan cloudflared servisini kullanır. Trafik `Cloudflar
 - `scripts/compose.sh`: etkin Compose kurulumu için yardımcı komut.
 - `scripts/configure-instance.php`: `.env` değerlerini Coolify panel ve wildcard ayarlarına uygular.
 - `scripts/backup.sh`: Coolify yönetim verilerinin yedeğini alır.
+- `services/beszel.compose.yml`: Coolify üzerinden kurulacak ilk izleme servisi için hub ve yerel agent tanımı.
 
 Cloudflare API veya tünel/DNS kaydı ekleyen betik yoktur. Bu işlemler aşağıda anlatıldığı gibi panelden manuel yapılır.
 
@@ -47,8 +48,8 @@ docker exec coolify printenv APP_URL
 1. **Choose Server Type → This machine** seçin. Bu seçim, Coolify'ın çalıştığı mevcut `localhost` sunucusunu kullanır. Aynı sunucuyu yeniden IP adresiyle eklemeniz gerekmez.
 2. SSH anahtarı ilk kurulumda kaydedilmiştir. Doğrulamanın tamamlanmasını bekleyin. Bu kurulumdaki yeterli Docker sürümü tekrar kurulum gerektirmez. Ekran Docker kurulumunu zorunlu tutarsa önce sunucunun Docker/SSH bağlantısını kontrol edin.
 3. Kurulu sürüm, başarılı doğrulamadan sonra **Traefik** seçimini otomatik yapar. Başka bir sürüm proxy sorarsa Traefik seçin. Özel proxy yapılandırmasını koruyun; varsayılana sıfırlamayın.
-4. **Project Setup → Create New Project** ile ilk projeyi oluşturun veya mevcut projenizi seçin. Projeyi sonradan adlandırabilirsiniz.
-5. **Create Your First Resource** ile uygulama ekleyin; uygulamanız mevcut Compose tanımıyla dağıtılacaksa **Docker Compose** seçin. Kurulumu uygulama eklemeden tamamlamak için ekrandaki atlama seçeneğini kullanabilirsiniz.
+4. Henüz uygulama kurmayacaksanız kurulum sihirbazını atlayıp kontrol paneline geçin. **Create New Project** boş bir proje oluşturur; bu adım zorunlu değildir.
+5. İlk gerçek uygulamanız hazır olduğunda bir proje oluşturup **New Resource → Docker Compose** kullanın. İzleme için ilk servis olarak aşağıdaki Beszel tanımını ekleyebilirsiniz.
 6. **Servers → localhost → Proxy** altında proxy'nin çalıştığını kontrol edin. Host portu `127.0.0.1:18080:80` kalmalıdır. Sunucunun **Wildcard Domain** değeri `APPS_DOMAIN` değişkeninden gelir.
 
 **IP address or domain**, başka bir SSH sunucusunu bağlamak içindir. Panelin Cloudflare Tunnel üzerinden yayınlanması, aynı sunucuyu kullanırken onboarding'de SSH için ayrıca bir Cloudflare Tunnel kurulmasını gerektirmez.
@@ -242,6 +243,49 @@ Kurulumu durdurmak için `./scripts/compose.sh stop` kullanılabilir. Proxy/sent
 
 Kaynaklar: [Resmi kurulum](https://coolify.io/docs/start-with-self-hosted), [Cloudflare Tunnel ile tüm kaynaklar](https://coolify.io/docs/integrations/networking/cloudflare/tunnels/all-resource).
 
-## Contributing and privacy
+## Beszel ile sunucu izleme
 
-Contributions are welcome through pull requests. Use `.env.example` with example domains when sharing a reproduction. Keep real environment files, credentials, SSH/Cloudflare keys, backups, database dumps, logs and infrastructure inventories outside Git. Check both file contents and commit author email before publishing.
+Beszel, hub ve agent bileşenlerinden oluşur. Kendi SQLite veritabanını kullanır; PostgreSQL servisi gerektirmez. İki bileşen aynı `BESZEL_VERSION` sürümüne sabitlenmiştir.
+
+1. Bir **İzleme** projesi oluşturun. Sihirbazın oluşturduğu proje boşsa onu yeniden adlandırabilirsiniz.
+2. **New Resource → Docker Compose** üzerinden `services/beszel.compose.yml` içeriğini ekleyin.
+3. Servisin **Environment Variables** bölümünde `BESZEL_DOMAIN`, `BESZEL_VERSION`, `BESZEL_USER_EMAIL` ve güçlü bir `BESZEL_USER_PASSWORD` tanımlayın. `.env.example` yalnızca örnektir; kök `.env` değerleri Coolify uygulamalarına kendiliğinden aktarılmaz.
+4. `beszel` bileşeninin alan adını `http://<BESZEL_DOMAIN>:8090` olarak ayarlayın. HTTP→HTTPS zorlamasını kapalı tutun; ziyaretçiler `https://<BESZEL_DOMAIN>` kullanır. `APP_URL` dış HTTPS adresini kullanır.
+5. Hub ilk kullanıcıyı ortam değerlerinden oluşturur. İlk bağlantıda hesabın hazır olduğunu doğrulayın ve parolayı değiştirin. İlk kullanıcı değişkenleri mevcut hesabın parolasını sonradan değiştirmez.
+6. Beszel'de **Add System** ile host alanına `/beszel_socket/beszel.sock` girin. Hub'ın gösterdiği public key ve token'ı Coolify servisindeki `BESZEL_AGENT_KEY` / `BESZEL_AGENT_TOKEN` değerlerine kaydedip servisi yeniden dağıtın.
+7. Sistemin çevrimiçi olduğunu ve CPU, bellek, disk ve konteyner metriklerinin geldiğini kontrol edin.
+
+Agent, host ağındaki istatistikleri okuyabilmek için `network_mode: host` kullanır; bağlantı Unix socket üzerinden yapıldığından ayrıca TCP portu açılmaz. Docker metrikleri için Docker socket'i salt okunur bağlanır; bu agent'in ayrıcalıklı Docker erişimi gerektirdiğini gözetin. `beszel_data` veritabanını ve `beszel_agent_data` agent durumunu kalıcı saklar. Uygulama verilerini de kapsayan ayrıca bir Beszel yedeği alın.
+
+Mevcut wildcard tünel kaydı yeni alan adını proxy'ye iletir. Önceden aynı hostname için özel bir DNS/tünel kaydı varsa manuel kontrol edin. Bu depoda Cloudflare kaydı oluşturan otomasyon bulunmaz.
+
+Kaynak: [Beszel başlangıç kılavuzu](https://beszel.dev/guide/getting-started), [ortam değişkenleri](https://beszel.dev/guide/environment-variables).
+
+## Ortak imaj ve sürüm politikası
+
+Önerilen varsayılan: **aynı uyumlu imaj sürümü, uygulama başına ayrı konteyner ve ayrı veri volume'ü**. Docker, aynı imajı ve aynı katmanları disk üzerinde paylaşır; her konteyner için imajın tamamını tekrar indirmez. Aynı imajı kullanmak veritabanlarını, parolaları veya volume'leri ortaklaştırmaz.
+
+- Uyumlu yeni projeler için bir PostgreSQL ana sürümü ve dağıtım türü seçin. `postgres:<sürüm>-alpine` ile Debian tabanlı varyant aynı imaj değildir; gereken eklentiler de uyumlu olmalıdır.
+- Aynı tam sürüm etiketini ve tercihen `@sha256:<digest>` değerini kullanın. `latest` kullanmayın. Digest sabitlemesi yeni güvenlik yamalarını otomatik getirmez; yamaları düzenli inceleyip planlı güncelleyin.
+- Coolify **Shared Variables → Team wide** altında örneğin `POSTGRES_IMAGE` tutabilirsiniz. Her serviste `POSTGRES_IMAGE={{team.POSTGRES_IMAGE}}` başvurusunu açıkça ekleyin ve Compose içinde `image: ${POSTGRES_IMAGE}` kullanın. Ortak değişken kendiliğinden tüm servislere uygulanmaz; değişiklik ilgili yeniden dağıtımda etkinleşir.
+- Coolify'ın kendi veritabanını ve sürüm/eklenti zorunluluğu bulunan uygulamaları bu politikadan ayrı değerlendirin. PostGIS gibi eklentiler düz PostgreSQL imajıyla aynı işlevi sunmaz.
+- Çalışan PostgreSQL 14/15/16/17 verilerini tek ana sürüme geçirmek, yalnızca imaj adını değiştirmekle yapılmaz. Uygulama ve eklenti uyumluluğunu doğrulayın; yedek, test, `pg_upgrade` veya mantıksal dump/restore ve geri dönüş planı hazırlayın.
+- Aynı yaklaşım Redis, Nginx ve Node taban imajlarında da uygulanabilir. Farklı uygulamaların kendi kod katmanları yine ayrı kalır; imaj sayısı tek başına disk tüketimini göstermez.
+
+Tek bir PostgreSQL sunucusunda uygulama başına ayrı veritabanı/rol kullanmak, RAM ve süreç sayısını azaltan bir alternatiftir. Buna karşılık kesinti, kaynak rekabeti ve sürüm yükseltmeleri tüm uygulamaları etkiler. Farklı bağımlılıkları olan mevcut projeler için başlangıç tercihi olarak ayrı konteynerler daha kolay yönetilir.
+
+İmaj değiştirmeden önce gerçek tüketimi ölçün:
+
+```bash
+docker system df
+docker system df -v
+docker buildx du
+```
+
+Build cache ile kullanılmayan imajları ayrı değerlendirin. Yalnızca gereksiz olduğu doğrulanan eski cache/imagelar için yaş ve kullanım sınırıyla temizlik yapın; geri dönüş için gereken imajları koruyun. Volume'leri temizlik hedefi haline getirmeyin.
+
+Kaynaklar: [Docker imaj katmanları](https://docs.docker.com/get-started/docker-concepts/building-images/understanding-image-layers/), [PostgreSQL ana sürüm yükseltme](https://www.postgresql.org/docs/current/upgrading.html), [Coolify ortak değişkenleri](https://coolify.io/docs/core/team/shared-variables).
+
+## Katkı ve gizlilik
+
+Katkılarınızı pull request ile gönderebilirsiniz. Bir sorunu paylaşırken örnek alan adları içeren `.env.example` kullanın. Gerçek ortam dosyalarını, kimlik bilgilerini, SSH/Cloudflare anahtarlarını, yedekleri, veritabanı dökümlerini, günlükleri ve altyapı envanterini Git dışında tutun. Yayımlamadan önce dosya içeriklerini ve commit yazarının e-posta adresini kontrol edin.
