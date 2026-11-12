@@ -1,23 +1,51 @@
-# docker-coolify
+# Coolify Altyapı Yapılandırması ve İşletim Kılavuzu
 
-Mevcut Cloudflare Tunnel arkasında Coolify'ı Docker Compose ile çalıştıran kurulum. Alan adlarını ortam değişkenlerinden alır; dış trafiği yalnızca loopback üzerinden kabul eder, PostgreSQL/Redis ağını ayırır ve tünel kayıtları manuel yönetilir.
+Bu depo, Coolify yönetim platformunun Docker Compose ile kurulması ve mevcut bir Cloudflare Tunnel üzerinden yayımlanması için gerekli altyapı yapılandırmasını içerir. Alan adı yönetimi, ağ yalıtımı, kalıcı depolama, erişim yönlendirmesi ve yapılandırma yedekleme süreçlerini kapsar.
 
-[MIT lisansı](LICENSE) ile yayımlanır. Coolify, Traefik ve diğer bağımlılıklar kendi lisanslarına tabidir. README'nin açıklama dili Türkçedir; komutlar, değişkenler ve arayüz düğmeleri gerçek adlarıyla yazılır.
+Yapılandırma, sunucuda çalışan `cloudflared` servisini kullanır. Coolify proxy'si yalnızca `127.0.0.1:18080` üzerinden erişime açılır; böylece sunucunun 80 ve 443 portlarını kullanan mevcut servislerle birlikte çalışabilir. DNS ve tünel kayıtları Cloudflare yönetim panelinden oluşturulur.
 
-Bu yapı, sunucuda çalışan cloudflared servisini kullanır. Trafik `Cloudflare → cloudflared → 127.0.0.1:18080 → Coolify proxy → uygulama` şeklinde ilerler. 80/443 portlarını kullanan diğer servislerle birlikte çalışabilir. Mevcut uygulamaların Coolify'a aktarılması ayrıca yapılır.
+## Mimari
 
-## Dosyalar ve tek yapılandırma kaynağı
+Trafik akışı aşağıdaki şekildedir:
 
-- `.env`: gerçek alan adları, ilk yönetici bilgileri ve kurulum sırları. Kurulu ortamda `/data/coolify/source/.env` dosyasına sembolik bağlantıdır; ayrı iki kopya tutulmaz.
-- `.env.example`: yeni kurulum için örnek değişkenler; gerçek sır içermez.
-- `docker-compose.custom.yml`: resmi Compose dosyalarının üzerine uygulanan port, ağ, kaynak sınırı ve alan adı etiketleri.
-- `proxy/docker-compose.yml`: yalnızca loopback'e açılan Coolify Traefik proxy'si.
-- `scripts/compose.sh`: etkin Compose kurulumu için yardımcı komut.
-- `scripts/configure-instance.php`: `.env` değerlerini Coolify panel ve wildcard ayarlarına uygular.
-- `scripts/backup.sh`: Coolify yönetim verilerinin yedeğini alır.
-- `services/beszel.compose.yml`: Coolify üzerinden kurulacak ilk izleme servisi için hub ve yerel agent tanımı.
+`İstemci HTTPS → Cloudflare → cloudflared → 127.0.0.1:18080 → Coolify Traefik proxy → hedef kaynak`
 
-Cloudflare API veya tünel/DNS kaydı ekleyen betik yoktur. Bu işlemler aşağıda anlatıldığı gibi panelden manuel yapılır.
+TLS istemci ile Cloudflare arasında sonlandırılır. Aynı sunucudaki tünel konektörü ile Coolify proxy'si arasındaki bağlantı HTTP kullanır.
+
+| Bileşen | Erişim ve işlev |
+| --- | --- |
+| Coolify yönetim paneli | `127.0.0.1:8000` |
+| Gerçek zamanlı bağlantı ve terminal | `127.0.0.1:6001` ve `127.0.0.1:6002` |
+| Traefik proxy | `127.0.0.1:18080` |
+| Coolify PostgreSQL ve Redis | Host portu yayımlanmadan, `coolify-internal` ağı üzerinden |
+| Kaynak ağı | `coolify`, varsayılan alt ağ `192.168.251.0/24` |
+| Kalıcı yapılandırma ve veriler | `/data/coolify` |
+
+## Depo yapısı
+
+| Dosya | Açıklama |
+| --- | --- |
+| `.env.example` | Alan adları, kurulum sırları ve ilk yönetici hesabı için örnek değişkenler |
+| `docker-compose.custom.yml` | Resmi Compose tanımlarına eklenen port, ağ, kaynak sınırı ve yönlendirme ayarları |
+| `proxy/docker-compose.yml` | Coolify Traefik proxy yapılandırması |
+| `scripts/compose.sh` | Etkin Coolify Compose kurulumu için komut arayüzü |
+| `scripts/configure-instance.php` | Ortam değişkenlerinin Coolify alan adı ve sunucu ayarlarına uygulanması |
+| `scripts/backup.sh` | Coolify yönetim veritabanı ve yapılandırma dosyalarının yedeklenmesi |
+
+Resmi Coolify Compose dosyaları kurulum sırasında `/data/coolify/source` dizinine indirilir. Yerel `.env`, bu dizindeki etkin `.env` dosyasına sembolik bağlantı olarak kullanılır. Gerçek kimlik bilgileri ve ortama özgü değerler sürüm kontrolüne dahil edilmez.
+
+## Ön koşullar
+
+- Ubuntu veya Coolify tarafından desteklenen bir Linux dağıtımı
+- Docker Engine ve Docker Compose **2.24.4 veya üzeri**
+- OpenSSH, `curl`, Python 3 ve yönetici yetkisi
+- DNS yönetimi Cloudflare üzerinde bulunan bir alan adı
+- Sunucuda çalışan bir Cloudflare Tunnel konektörü
+- Mevcut servislerle çakışmayan port ve ağ adresleri
+
+Kurulum komutları yeni ortamlar için hazırlanmıştır. Mevcut bir kurulumda veritabanı sırlarının veya SSH anahtarlarının yeniden oluşturulması, çalışan hizmetlerde erişim kaybına neden olabilir.
+
+## Ortam değişkenleri
 
 ```dotenv
 COOLIFY_DOMAIN=panel.example.com
@@ -25,61 +53,28 @@ APPS_DOMAIN=example.com
 APP_URL="https://${COOLIFY_DOMAIN}"
 ```
 
-İlk iki değişkende yalnızca hostname kullanın; `http://`, `https://`, port veya yol eklemeyin. Gerçek değerleri sadece `.env` içine yazın. Compose etiketleri bu değerleri çözümler; Coolify'ın veritabanı ve `/data/coolify/proxy/dynamic` altındaki üretilen çalışma dosyaları ayarların doğal olarak çözümlenmiş kopyalarını tutar. Bunları elle düzenlemeyin.
+| Değişken | Açıklama |
+| --- | --- |
+| `COOLIFY_DOMAIN` | Yönetim panelinin alan adı |
+| `APPS_DOMAIN` | Kaynakların wildcard alan adı için temel alan adı |
+| `APP_URL` | `COOLIFY_DOMAIN` üzerinden oluşturulan dış HTTPS adresi |
+| `ROOT_USER_EMAIL`, `ROOT_USER_PASSWORD` | İlk yönetici hesabının oluşturulmasında kullanılan bilgiler |
+| `APP_KEY` | Coolify tarafından saklanan hassas değerlerin şifreleme anahtarı |
+| `DB_PASSWORD`, `REDIS_PASSWORD` | Coolify yönetim veritabanı ve Redis erişim sırları |
+| `LATEST_IMAGE` | Kullanılacak Coolify imaj sürümü |
 
-## Kurulu ortamın kullanımı
+Alan adları protokol, port veya yol içermemelidir. Gerçek değerler yalnızca `.env` üzerinden yönetilir. Coolify veritabanı ve üretilen proxy dosyaları, bu ayarların çözümlenmiş çalışma kopyalarını içerir.
 
-```bash
-./scripts/compose.sh ps
-./scripts/compose.sh logs --tail 100 coolify
-./scripts/compose.sh config --quiet
-```
+## Kurulum
 
-Panel adresi `https://<COOLIFY_DOMAIN>` şeklindedir. Gerçek adresi görmek için:
-
-```bash
-docker exec coolify printenv APP_URL
-```
-
-İlk giriş için `.env` içindeki `ROOT_USER_EMAIL` ve `ROOT_USER_PASSWORD` kullanılır. Bunlar yalnızca ilk yönetici hesabının oluşturulmasında geçerlidir; mevcut hesabın parolasını `.env` değiştirerek sıfırlayamazsınız. İlk girişte hesabın e-postasını ve parolasını panelden değiştirin. SMTP ayrıca yapılandırılmalıdır; genel kayıt kapalıdır.
-
-### İlk giriş ve onboarding
-
-1. **Choose Server Type → This machine** seçin. Bu seçim, Coolify'ın çalıştığı mevcut `localhost` sunucusunu kullanır. Aynı sunucuyu yeniden IP adresiyle eklemeniz gerekmez.
-2. SSH anahtarı ilk kurulumda kaydedilmiştir. Doğrulamanın tamamlanmasını bekleyin. Bu kurulumdaki yeterli Docker sürümü tekrar kurulum gerektirmez. Ekran Docker kurulumunu zorunlu tutarsa önce sunucunun Docker/SSH bağlantısını kontrol edin.
-3. Kurulu sürüm, başarılı doğrulamadan sonra **Traefik** seçimini otomatik yapar. Başka bir sürüm proxy sorarsa Traefik seçin. Özel proxy yapılandırmasını koruyun; varsayılana sıfırlamayın.
-4. Henüz uygulama kurmayacaksanız kurulum sihirbazını atlayıp kontrol paneline geçin. **Create New Project** boş bir proje oluşturur; bu adım zorunlu değildir.
-5. İlk gerçek uygulamanız hazır olduğunda bir proje oluşturup **New Resource → Docker Compose** kullanın. İzleme için ilk servis olarak aşağıdaki Beszel tanımını ekleyebilirsiniz.
-6. **Servers → localhost → Proxy** altında proxy'nin çalıştığını kontrol edin. Host portu `127.0.0.1:18080:80` kalmalıdır. Sunucunun **Wildcard Domain** değeri `APPS_DOMAIN` değişkeninden gelir.
-
-**IP address or domain**, başka bir SSH sunucusunu bağlamak içindir. Panelin Cloudflare Tunnel üzerinden yayınlanması, aynı sunucuyu kullanırken onboarding'de SSH için ayrıca bir Cloudflare Tunnel kurulmasını gerektirmez.
-
-### Alan adını değiştirmek
-
-1. `.env` içindeki `COOLIFY_DOMAIN` ve gerekiyorsa `APPS_DOMAIN` değerlerini düzenleyin. `APP_URL` değişken başvurusunu koruyun.
-2. Compose özelleştirmesinde de değişiklik yaptıysanız etkin kopyaya aktarın.
-3. Panel konteynerini yeniden oluşturup ayarları uygulayın:
-
-```bash
-cp docker-compose.custom.yml /data/coolify/source/docker-compose.custom.yml
-./scripts/compose.sh up -d --no-deps --wait coolify
-docker exec -i coolify php < scripts/configure-instance.php
-```
-
-4. Cloudflare tarafında yeni hostname/DNS kayıtlarını manuel güncelleyin. `.env` değişikliği Cloudflare'a kayıt eklemez. Önceden dağıtılmış uygulamaların alan adları da kendiliğinden değiştirilmez.
-
-## Sıfırdan kurulum
-
-Bu bölüm yeni kurulum içindir; çalışan veritabanını veya mevcut sırları yeniden üretmek için kullanılmaz. Ubuntu üzerinde Docker Engine, Compose **2.24.4 veya üzeri**, OpenSSH, curl, Python 3 ve sudo/root erişimi gerekir. Docker daemon'ını yeniden başlatmanız gerekmez. Ağların ve portların mevcut servislerle çakışmadığını kontrol edin.
-
-### 1. Ortam dosyasını hazırlayın
+### 1. Ortam dosyasının hazırlanması
 
 ```bash
 cp -n .env.example .env
 chmod 600 .env
 ```
 
-`.env` içinde alan adlarını ve gerçek yönetici e-postasını ayarlayın. Aşağıdaki komut yalnızca boş sırları doldurur; mevcut değerleri değiştirmez:
+Alan adları ve geçerli yönetici e-posta adresi `.env` dosyasında tanımlanmalıdır. Aşağıdaki komut, yalnızca boş bırakılmış kurulum sırlarını üretir:
 
 ```bash
 python3 - <<'PYTHON'
@@ -102,7 +97,7 @@ p.write_text('\n'.join(k + '=' + values[k] if '=' in line and (k := line.split('
 PYTHON
 ```
 
-### 2. Kalıcı dizinleri ve resmi dosyaları hazırlayın
+### 2. Kalıcı dizinlerin ve resmi dosyaların hazırlanması
 
 ```bash
 sudo install -d -m 755 /data/coolify
@@ -122,17 +117,17 @@ cp docker-compose.custom.yml /data/coolify/source/docker-compose.custom.yml
 sudo install -o 9999 -g 9999 -m 644 proxy/docker-compose.yml /data/coolify/proxy/docker-compose.yml
 ```
 
-Proxy dosyasını ilk başlatmadan önce yerleştirin. Aksi durumda Coolify varsayılan proxy'si 80/443 portlarını kullanmaya çalışır.
+Özel proxy yapılandırması ilk başlatmadan önce yerleştirilmelidir. Coolify'ın varsayılan proxy ayarları, sunucunun 80 ve 443 portlarını kullanır.
 
-### 3. Uygulama ağını oluşturun
+### 3. Kaynak ağının oluşturulması
 
 ```bash
 docker network create --attachable --subnet 192.168.251.0/24 coolify
 ```
 
-Ağ zaten varsa yeniden oluşturmayın; `docker network inspect coolify` ile kontrol edin. Farklı subnet seçerseniz aşağıdaki SSH yetkisindeki kaynak ağını ve proxy dosyasındaki güvenilen gateway adresini de eşleştirin. PostgreSQL ve Redis, Compose tarafından oluşturulan `coolify-internal` ağına bağlıdır; host portları yoktur.
+Ağ mevcutsa `docker network inspect coolify` ile doğrulanmalıdır. Alt ağ değiştirildiğinde SSH yetkilendirmesindeki kaynak ağı ve proxy yapılandırmasındaki güvenilen gateway adresi de güncellenmelidir. `coolify-internal` ağı Compose tarafından oluşturulur.
 
-### 4. Coolify için özel SSH anahtarı oluşturun
+### 4. Sunucu yönetimi için SSH yetkilendirmesi
 
 ```bash
 sudo ssh-keygen -q -t ed25519 -N '' -C coolify-local \
@@ -145,75 +140,135 @@ sudo sh -c 'printf "\nfrom=\"192.168.251.0/24\",no-agent-forwarding,no-port-forw
 sudo chown 9999:9999 /data/coolify/ssh/keys/id.root@host.docker.internal*
 ```
 
-Mevcut özel anahtarın üzerine yazmayın veya yetki satırını tekrar eklemeyin. OpenSSH'in root hesabına anahtarlı girişe izin vermesi gerekir. Mevcut SSH ayarları ve diğer yetkili anahtarlar korunmalıdır.
+Anahtar mevcutsa yeniden üretilmemelidir. OpenSSH yapılandırması, root hesabına anahtarlı erişimi desteklemelidir. Yetkilendirme yalnızca tanımlanan kaynak alt ağı için geçerlidir; diğer SSH anahtarları korunmalıdır.
 
-### 5. Başlatın ve ayarları uygulayın
+### 5. Servislerin başlatılması
 
 ```bash
 ./scripts/compose.sh config --quiet
 ./scripts/compose.sh up -d --wait
-
 docker ps --filter name=coolify
 ```
 
-İlk açılışta migrasyon, yönetici oluşturma ve proxy başlatma işleri çalışır. `coolify` ve `coolify-proxy` sağlıklı olduğunda:
+İlk başlatmada veritabanı migrasyonları, yönetici hesabı oluşturma ve proxy hazırlık işlemleri çalışır. `coolify` ve `coolify-proxy` sağlıklı duruma geldikten sonra ortam ayarları uygulanır:
 
 ```bash
 docker exec -i coolify php < scripts/configure-instance.php
 ```
 
-Bu işlem alan adını ve wildcard ayarını ortam değişkenlerinden uygular, genel kaydı kapatır ve sunucuya SSH erişimini doğrular. Otomatik güncelleme politikasını değiştirmez. İlk hesabın oluştuğunu doğrulamadan panel tünelini yayınlamayın.
+Bu işlem panel alan adını ve wildcard ayarını uygular, genel kullanıcı kaydını kapatır ve sunucuya SSH erişimini doğrular. Otomatik güncelleme politikasını değiştirmez. Dış erişim açılmadan önce ilk yönetici hesabının oluşturulduğu doğrulanmalıdır.
 
-## Cloudflare kayıtlarını manuel ekleme
+## Cloudflare Tunnel ve DNS yapılandırması
 
-Aşağıdaki `<COOLIFY_DOMAIN>` ve `<APPS_DOMAIN>` ifadeleri, `.env` dosyasındaki gerçek değerlerle değiştirilmelidir.
+Aşağıdaki yer tutucular `.env` dosyasındaki gerçek değerlerle değiştirilmelidir.
 
-1. Cloudflare'da **Networking → Tunnels** bölümünden bu sunucuda çalışan mevcut tüneli seçin. Yeni bir konektör kurmanız gerekmez.
-2. **Routes / Published application routes** bölümünde iki hostname ekleyin:
+1. Cloudflare yönetim panelinde **Networking → Tunnels** altında mevcut sunucu tüneli açılır.
+2. **Routes / Published application routes** bölümüne aşağıdaki yönlendirmeler eklenir:
 
 | Hostname | Origin servis | Path |
 | --- | --- | --- |
 | `<COOLIFY_DOMAIN>` | `http://127.0.0.1:18080` | Boş |
 | `*.<APPS_DOMAIN>` | `http://127.0.0.1:18080` | Boş |
 
-3. Origin **HTTP Host Header** alanını boş bırakın; uygulama seçimi ziyaretçinin orijinal hostname'iyle yapılır. WebSocket desteği açık olmalıdır.
-4. **DNS → Records** altında her hostname için proxied CNAME kaydını kontrol edin. Hedef `<TUNNEL_ID>.cfargotunnel.com` olmalıdır. Wildcard kaydının adı `*` olur. Arayüz kaydı otomatik oluşturduysa ikinci kayıt eklemeyin; var olan farklı bir kaydı incelemeden değiştirmeyin.
-5. Mevcut tam eşleşen uygulama kurallarını ve diğer DNS kayıtlarını koruyun. Yeni wildcard kuralını mevcut özel kurallardan sonra ve varsa son 404 kuralından önce konumlandırın.
+3. **HTTP Host Header** alanı boş bırakılır; yönlendirme, isteğin özgün hostname değeriyle yapılır. WebSocket desteği etkin olmalıdır.
+4. **DNS → Records** bölümünde ilgili hostname'ler için proxied CNAME kayıtları doğrulanır. Hedef `<TUNNEL_ID>.cfargotunnel.com` olmalıdır. Wildcard kaydının adı `*` olarak tanımlanır. Otomatik oluşturulmuş kayıtlar tekrar eklenmemelidir.
+5. Mevcut tam eşleşen kayıtlar korunur. Wildcard kuralı özel kurallardan sonra ve varsa son 404 kuralından önce konumlandırılır.
 
-HTTP panel istekleri HTTPS'e yönlendirilir. Ziyaretçi HTTPS kullanırken tünelin origin bağlantısı HTTP olarak kalır. Coolify panelindeki **Force HTTPS** ayarını açmayın; HTTPS'e geçiş, dış bağlantının protokolünü dikkate alan Compose etiketleriyle yapılır. İsterseniz Cloudflare'da yalnızca panel hostname'ine özel HTTPS yönlendirme kuralı da tanımlayabilirsiniz.
+Panelin HTTP istekleri, dış bağlantının protokolünü dikkate alan Compose etiketleriyle HTTPS'e yönlendirilir. Origin bağlantısı HTTP olarak kaldığından Coolify panelindeki **Force HTTPS** ayarı kapalı tutulmalıdır.
 
-### Yeni uygulamaların alt alan adları
+Kaynaklar için `http://uygulama.<APPS_DOMAIN>` biçimi kullanılabilir; dış erişim `https://uygulama.<APPS_DOMAIN>` üzerinden sağlanır. Coolify'da `https://...` alan adı tanımlandığında ilgili kaynağın **Redirect HTTP to HTTPS** ayarı, HTTP origin bağlantısına uygun biçimde kapatılmalıdır. Uygulamanın dış adres ve güvenli çerez ayarları HTTPS kullanmalıdır.
 
-Coolify'da uygulamaya `http://uygulama.<APPS_DOMAIN>` alan adı ve gerçek konteyner portunu verin. Ziyaretçi `https://uygulama.<APPS_DOMAIN>` kullanır. Coolify'a `https://...` giriyorsanız ilgili kaynağın **Redirect HTTP to HTTPS** ayarını kapatın; HTTP origin üzerinden yönlendirme döngüsü oluşmasın. Uygulamanın dış URL ve güvenli çerez ayarları HTTPS kullanmalıdır.
+Özel DNS veya tünel kayıtları wildcard'dan önceliklidir. Alt alan adı derinliği arttığında sertifika kapsamı ayrıca değerlendirilmelidir. SSH, veritabanı ve UDP erişimi ayrı bağlantı yapılandırması gerektirir.
 
-Yeni, boş bir alt alan adı için ayrı tünel kuralı gerekmez. Mevcut tam eşleşen DNS/tünel kayıtları wildcard'dan önceliklidir. Mevcut uygulama taşındığında onun eski kuralını da proxy'ye yönlendirin. Daha derin hostname'lerde Cloudflare sertifika kapsamını ayrıca kontrol edin. SSH, veritabanı ve UDP servisleri için ayrı bağlantı tasarımı gerekir.
+## İlk erişim ve sunucu doğrulaması
 
-## DNS_PROBE_POSSIBLE / DNS adresi bulunamadı
+Panel adresi `https://<COOLIFY_DOMAIN>` şeklindedir. Etkin adres aşağıdaki komutla görüntülenebilir:
 
-Bu hata, HTTP isteği sunucuya ulaşmadan önce DNS çözümlemesinde oluşur. Kurum içi DNS eski bir **NXDOMAIN** yanıtını önbellekte tutarken kamuya açık DNS doğru IP döndürebilir. İki kaynağı karşılaştırın. Aşağıdaki DNS sunucusu adresi dokümantasyon örneğidir; kendi DNS adresinizle değiştirin.
+```bash
+docker exec coolify printenv APP_URL
+```
+
+İlk yönetici hesabında `ROOT_USER_EMAIL` ve `ROOT_USER_PASSWORD` değerleri kullanılır. Bu değişkenler, mevcut hesabın parolasını sonradan değiştirmez. Hesap bilgileri ilk girişte gözden geçirilmeli; e-posta gönderimi için SMTP ayrıca yapılandırılmalıdır.
+
+Kurulum sihirbazında **Choose Server Type → This machine**, mevcut `localhost` sunucusunu kullanır. SSH ve Docker doğrulaması tamamlandıktan sonra Traefik yapılandırması korunmalıdır. Yeni proje veya uygulama oluşturma adımları, altyapı kurulumunun tamamlanması için zorunlu değildir; sihirbazın atlama seçeneği kullanılabilir.
+
+**Servers → localhost → Proxy** bölümünde proxy durumu ve `127.0.0.1:18080:80` eşlemesi doğrulanmalıdır. **IP address or domain** seçeneği, ayrı bir SSH sunucusunun eklenmesi içindir.
+
+## Yapılandırma yönetimi
+
+Alan adı değişiklikleri `.env` üzerinden yapılır. Compose özelleştirmesi değiştirildiğinde etkin kopyaya aktarılır ve ilgili ayarlar yeniden uygulanır:
+
+```bash
+cp docker-compose.custom.yml /data/coolify/source/docker-compose.custom.yml
+./scripts/compose.sh up -d --no-deps --wait coolify
+docker exec -i coolify php < scripts/configure-instance.php
+```
+
+Cloudflare kayıtları ayrıca manuel güncellenmelidir. Mevcut kaynakların alan adları, platformun `.env` dosyası değiştirildiğinde kendiliğinden değiştirilmez.
+
+Temel işletim komutları:
+
+```bash
+./scripts/compose.sh ps
+./scripts/compose.sh logs --tail 100 coolify
+./scripts/compose.sh config --quiet
+./scripts/compose.sh stop
+```
+
+Proxy ve sentinel, ana Compose projesinden ayrı konteynerler olarak yönetilir. Veri volume'lerinin korunması gereken ortamlarda `down -v` kullanılmamalıdır.
+
+## Yedekleme ve kurtarma
+
+```bash
+./scripts/backup.sh
+# İsteğe bağlı hedef dizin:
+./scripts/backup.sh /guvenli/yedek/klasoru
+```
+
+Varsayılan hedef `$HOME/backups/coolify` altındadır. Yedek kapsamı:
+
+- Coolify PostgreSQL veritabanı dökümü
+- `APP_KEY` dahil etkin `.env` ve Compose dosyaları
+- SSH anahtarları ve kaynak yapılandırmaları
+- Proxy yapılandırma dosyaları
+
+Dağıtılan uygulamaların veritabanı ve volume içerikleri ayrıca yedeklenmelidir. Yedekler hassas veri içerdiğinden erişim izinleri kısıtlanmalı ve sunucu dışında güvenli bir kopya tutulmalıdır.
+
+Kurtarmada dosyalar aynı yollarına ve uygun sahipliklerle geri yüklenir. PostgreSQL başlatılarak döküm boş Coolify veritabanına `pg_restore` ile aktarılır; ardından Coolify ve proxy başlatılır. Aynı `APP_KEY`, şifrelenmiş değerlerin çözülebilmesi için zorunludur.
+
+## Sürüm ve güncelleme yönetimi
+
+Coolify imaj sürümü `LATEST_IMAGE` üzerinden belirlenir. Güncellemeden önce yapılandırma ve veritabanı yedeği alınmalıdır. Resmi güncelleme yolu `/data/coolify/source/docker-compose.custom.yml` dosyasını korur.
+
+Proxy yapılandırmasının varsayılana sıfırlanması 80/443 port çakışmasını geri getirebilir. Özel port eşlemesi güncellemelerde korunmalıdır. Yönetim PostgreSQL veritabanında ana sürüm değişikliği, uyumluluk doğrulaması ve veri taşıma planı gerektirir; yalnızca imaj etiketi değiştirilerek uygulanmamalıdır.
+
+Disk tüketimi aşağıdaki komutlarla incelenebilir. Temizlik politikaları kullanılmayan imajlar ve build cache için ayrı değerlendirilmelidir; geri dönüş için gerekli imajlar ve kalıcı veriler korunmalıdır.
+
+```bash
+docker system df
+docker system df -v
+```
+
+## DNS ve erişim sorunlarının incelenmesi
+
+`DNS_PROBE_POSSIBLE` veya `NXDOMAIN` hatası, isteğin uygulamaya ulaşmasından önce DNS çözümlemesinde oluşur. Kurum içi DNS ile kamuya açık DNS yanıtları karşılaştırılmalıdır. Aşağıdaki `192.0.2.53` dokümantasyon adresi, ilgili ortamın DNS sunucusuyla değiştirilmelidir.
 
 ```bash
 panel_domain=$(docker exec coolify printenv COOLIFY_DOMAIN)
-lan_dns=192.0.2.53 # Örnek adres; kendi DNS sunucunuzu yazın.
+lan_dns=192.0.2.53
 dig @"$lan_dns" "$panel_domain" A +noedns
 dig @1.1.1.1 "$panel_domain" A +noedns
 ```
 
-Kurum içi DNS yöneticisi, kullanılan DNS sunucusundaki negatif DNS önbelleğini ve varsa onun kullandığı üst DNS önbelleğini temizlemelidir. DNS sunucusu Windows DNS ise yönetici oturumunda:
+Kurum içi DNS eski bir negatif yanıtı önbellekte tutuyorsa sunucu ve gerektiğinde üst DNS önbelleği temizlenmelidir. Windows DNS sunucusunda yönetici oturumu için:
 
 ```powershell
 Clear-DnsServerCache -Force
 ```
 
-Ardından Windows istemcide:
+Windows istemcide `ipconfig /flushdns`, Linux istemcide `sudo resolvectl flush-caches` kullanılabilir. Üst DNS hâlâ `NXDOMAIN` döndürüyorsa yalnızca istemci önbelleğinin temizlenmesi yeterli değildir. Alternatif olarak negatif kaydın TTL süresinin dolması beklenebilir; sorun sürerse DNS yönlendirme ve filtreleme ayarları incelenmelidir.
 
-```powershell
-ipconfig /flushdns
-```
-
-Linux istemcide `sudo resolvectl flush-caches` kullanılabilir. **Yalnızca istemci önbelleğini temizlemek, üst DNS hâlâ NXDOMAIN döndürüyorsa yeterli değildir.** Alternatif olarak negatif kaydın TTL süresinin dolması beklenebilir. Hata devam ederse DNS sunucusunun forwarder/filtreleme ayarlarını kontrol edin. DNS düzelene kadar port veya tünel kaydını değiştirmek bu hatayı çözmez.
-
-DNS'ten bağımsız, TLS sertifikasını da doğrulayan dış erişim testi:
+Yerel DNS'ten bağımsız HTTP/HTTPS doğrulaması:
 
 ```bash
 panel_edge=$(dig @1.1.1.1 "$panel_domain" A +short | head -n 1)
@@ -221,71 +276,15 @@ curl --resolve "$panel_domain:80:$panel_edge" -I "http://$panel_domain/login"
 curl --resolve "$panel_domain:443:$panel_edge" -I "https://$panel_domain/login"
 ```
 
-Beklenen sonuç HTTP için HTTPS'e **301**, HTTPS giriş sayfası için **200**'dür. Cloudflare IP'lerini kalıcı hosts/DNS kaydı olarak sabitlemeyin.
+Beklenen yanıt HTTP için HTTPS'e **301**, HTTPS giriş sayfası için **200**'dür. Cloudflare IP adresleri kalıcı hosts veya DNS kayıtları olarak sabitlenmemelidir.
 
-## Yedek, güncelleme ve taşıma
+## Katkı ve bilgi güvenliği
 
-```bash
-./scripts/backup.sh
-# Veya hedef klasörü kendiniz verin:
-./scripts/backup.sh /guvenli/yedek/klasoru
-```
+Katkılar pull request üzerinden değerlendirilir. Hata bildirimlerinde örnek alan adları ve temizlenmiş yapılandırmalar kullanılmalıdır. Gerçek `.env` dosyaları, kimlik bilgileri, SSH/Cloudflare anahtarları, yedekler, veritabanı dökümleri, günlükler ve altyapı envanterleri sürüm kontrolüne dahil edilmemelidir. Yayımlama öncesinde içerik ve commit yazarının e-posta adresi kontrol edilmelidir.
 
-Varsayılan yedek konumu `$HOME/backups/coolify` altıdır. Yedek, Coolify PostgreSQL dump'ını, aynı APP_KEY dahil `.env`/Compose dosyalarını, SSH ve uygulama yapılandırmalarını, proxy dosyalarını içerir. **Uygulamaların gerçek veritabanları ve volume verileri bu yedeğe dahil değildir.** Sır içeren yedekleri erişimi kısıtlı tutun ve sunucu dışında saklayın.
+## Lisans ve referanslar
 
-Kurtarma için kaynak dosyaları aynı yollarına geri koyun; yalnızca PostgreSQL'i başlatıp dump'ı boş Coolify veritabanına `pg_restore` ile yükleyin; ardından Coolify ve proxy'yi başlatın. Aynı APP_KEY olmadan şifrelenmiş değerler çözülemez. Dosya sahipliklerini yukarıdaki kurulumla eşleştirin.
+Depo [MIT lisansı](LICENSE) ile yayımlanır. Coolify, Traefik ve diğer bağımlılıklar kendi lisanslarına tabidir.
 
-Resmi güncelleme yolu `/data/coolify/source/docker-compose.custom.yml` dosyasını korur. Güncellemeden önce yedek alın. Proxy'yi varsayılana sıfırlamak 80/443 çakışmasını geri getirir; `127.0.0.1:18080:80` eşlemesini koruyun. Coolify sunucu ayarlarında otomatik Docker temizliği politikasını kullanımınıza göre gözden geçirin. Mevcut uygulamaların verilerini/imajlarını topluca temizlemeyin.
-
-Mevcut Compose projelerini taşırken önce kaynak dosyalarını, ortam değişkenlerini ve kalıcı volume/bind mount'larını envanterleyip veritabanı yedeği alın. Coolify'da external volume veya mutlak bind yollarını açıkça tanımlayın; yeni proje adıyla boş volume oluşmasını önleyin. Önce farklı bir test alt alan adında doğrulayın, sonra ilgili tünel kuralını proxy'ye taşıyın. Aynı veritabanı dosyasını iki veritabanı konteynerinde eşzamanlı açmayın. Çalışan bir konteyneri yalnızca proxy'ye bağlamak deploy yaşam döngüsünü Coolify'a devretmez.
-
-Kurulumu durdurmak için `./scripts/compose.sh stop` kullanılabilir. Proxy/sentinel ayrı konteynerlerdir. Veri silmek istemiyorsanız `down -v` kullanmayın.
-
-Kaynaklar: [Resmi kurulum](https://coolify.io/docs/start-with-self-hosted), [Cloudflare Tunnel ile tüm kaynaklar](https://coolify.io/docs/integrations/networking/cloudflare/tunnels/all-resource).
-
-## Beszel ile sunucu izleme
-
-Beszel, hub ve agent bileşenlerinden oluşur. Kendi SQLite veritabanını kullanır; PostgreSQL servisi gerektirmez. İki bileşen aynı `BESZEL_VERSION` sürümüne sabitlenmiştir.
-
-1. Bir **İzleme** projesi oluşturun. Sihirbazın oluşturduğu proje boşsa onu yeniden adlandırabilirsiniz.
-2. **New Resource → Docker Compose** üzerinden `services/beszel.compose.yml` içeriğini ekleyin.
-3. Servisin **Environment Variables** bölümünde `BESZEL_DOMAIN`, `BESZEL_VERSION`, `BESZEL_USER_EMAIL` ve güçlü bir `BESZEL_USER_PASSWORD` tanımlayın. `.env.example` yalnızca örnektir; kök `.env` değerleri Coolify uygulamalarına kendiliğinden aktarılmaz.
-4. `beszel` bileşeninin alan adını `http://<BESZEL_DOMAIN>:8090` olarak ayarlayın. HTTP→HTTPS zorlamasını kapalı tutun; ziyaretçiler `https://<BESZEL_DOMAIN>` kullanır. `APP_URL` dış HTTPS adresini kullanır.
-5. Hub ilk kullanıcıyı ortam değerlerinden oluşturur. İlk bağlantıda hesabın hazır olduğunu doğrulayın ve parolayı değiştirin. İlk kullanıcı değişkenleri mevcut hesabın parolasını sonradan değiştirmez.
-6. Beszel'de **Add System** ile host alanına `/beszel_socket/beszel.sock` girin. Hub'ın gösterdiği public key ve token'ı Coolify servisindeki `BESZEL_AGENT_KEY` / `BESZEL_AGENT_TOKEN` değerlerine kaydedip servisi yeniden dağıtın.
-7. Sistemin çevrimiçi olduğunu ve CPU, bellek, disk ve konteyner metriklerinin geldiğini kontrol edin.
-
-Agent, host ağındaki istatistikleri okuyabilmek için `network_mode: host` kullanır; bağlantı Unix socket üzerinden yapıldığından ayrıca TCP portu açılmaz. Docker metrikleri için Docker socket'i salt okunur bağlanır; bu agent'in ayrıcalıklı Docker erişimi gerektirdiğini gözetin. `beszel_data` veritabanını ve `beszel_agent_data` agent durumunu kalıcı saklar. Uygulama verilerini de kapsayan ayrıca bir Beszel yedeği alın.
-
-Mevcut wildcard tünel kaydı yeni alan adını proxy'ye iletir. Önceden aynı hostname için özel bir DNS/tünel kaydı varsa manuel kontrol edin. Bu depoda Cloudflare kaydı oluşturan otomasyon bulunmaz.
-
-Kaynak: [Beszel başlangıç kılavuzu](https://beszel.dev/guide/getting-started), [ortam değişkenleri](https://beszel.dev/guide/environment-variables).
-
-## Ortak imaj ve sürüm politikası
-
-Önerilen varsayılan: **aynı uyumlu imaj sürümü, uygulama başına ayrı konteyner ve ayrı veri volume'ü**. Docker, aynı imajı ve aynı katmanları disk üzerinde paylaşır; her konteyner için imajın tamamını tekrar indirmez. Aynı imajı kullanmak veritabanlarını, parolaları veya volume'leri ortaklaştırmaz.
-
-- Uyumlu yeni projeler için bir PostgreSQL ana sürümü ve dağıtım türü seçin. `postgres:<sürüm>-alpine` ile Debian tabanlı varyant aynı imaj değildir; gereken eklentiler de uyumlu olmalıdır.
-- Aynı tam sürüm etiketini ve tercihen `@sha256:<digest>` değerini kullanın. `latest` kullanmayın. Digest sabitlemesi yeni güvenlik yamalarını otomatik getirmez; yamaları düzenli inceleyip planlı güncelleyin.
-- Coolify **Shared Variables → Team wide** altında örneğin `POSTGRES_IMAGE` tutabilirsiniz. Her serviste `POSTGRES_IMAGE={{team.POSTGRES_IMAGE}}` başvurusunu açıkça ekleyin ve Compose içinde `image: ${POSTGRES_IMAGE}` kullanın. Ortak değişken kendiliğinden tüm servislere uygulanmaz; değişiklik ilgili yeniden dağıtımda etkinleşir.
-- Coolify'ın kendi veritabanını ve sürüm/eklenti zorunluluğu bulunan uygulamaları bu politikadan ayrı değerlendirin. PostGIS gibi eklentiler düz PostgreSQL imajıyla aynı işlevi sunmaz.
-- Çalışan PostgreSQL 14/15/16/17 verilerini tek ana sürüme geçirmek, yalnızca imaj adını değiştirmekle yapılmaz. Uygulama ve eklenti uyumluluğunu doğrulayın; yedek, test, `pg_upgrade` veya mantıksal dump/restore ve geri dönüş planı hazırlayın.
-- Aynı yaklaşım Redis, Nginx ve Node taban imajlarında da uygulanabilir. Farklı uygulamaların kendi kod katmanları yine ayrı kalır; imaj sayısı tek başına disk tüketimini göstermez.
-
-Tek bir PostgreSQL sunucusunda uygulama başına ayrı veritabanı/rol kullanmak, RAM ve süreç sayısını azaltan bir alternatiftir. Buna karşılık kesinti, kaynak rekabeti ve sürüm yükseltmeleri tüm uygulamaları etkiler. Farklı bağımlılıkları olan mevcut projeler için başlangıç tercihi olarak ayrı konteynerler daha kolay yönetilir.
-
-İmaj değiştirmeden önce gerçek tüketimi ölçün:
-
-```bash
-docker system df
-docker system df -v
-docker buildx du
-```
-
-Build cache ile kullanılmayan imajları ayrı değerlendirin. Yalnızca gereksiz olduğu doğrulanan eski cache/imagelar için yaş ve kullanım sınırıyla temizlik yapın; geri dönüş için gereken imajları koruyun. Volume'leri temizlik hedefi haline getirmeyin.
-
-Kaynaklar: [Docker imaj katmanları](https://docs.docker.com/get-started/docker-concepts/building-images/understanding-image-layers/), [PostgreSQL ana sürüm yükseltme](https://www.postgresql.org/docs/current/upgrading.html), [Coolify ortak değişkenleri](https://coolify.io/docs/core/team/shared-variables).
-
-## Katkı ve gizlilik
-
-Katkılarınızı pull request ile gönderebilirsiniz. Bir sorunu paylaşırken örnek alan adları içeren `.env.example` kullanın. Gerçek ortam dosyalarını, kimlik bilgilerini, SSH/Cloudflare anahtarlarını, yedekleri, veritabanı dökümlerini, günlükleri ve altyapı envanterini Git dışında tutun. Yayımlamadan önce dosya içeriklerini ve commit yazarının e-posta adresini kontrol edin.
+- [Coolify resmi kurulum kılavuzu](https://coolify.io/docs/start-with-self-hosted)
+- [Coolify ile Cloudflare Tunnel yapılandırması](https://coolify.io/docs/integrations/networking/cloudflare/tunnels/all-resource)
