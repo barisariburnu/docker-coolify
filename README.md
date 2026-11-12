@@ -234,7 +234,7 @@ Varsayılan hedef `$HOME/backups/coolify` altındadır. Yedek kapsamı:
 - SSH anahtarları ve kaynak yapılandırmaları
 - Proxy yapılandırma dosyaları
 
-Dağıtılan uygulamaların veritabanı ve volume içerikleri ayrıca yedeklenmelidir. Yedekler hassas veri içerdiğinden erişim izinleri kısıtlanmalı ve sunucu dışında güvenli bir kopya tutulmalıdır.
+Servis dizinlerindeki `persistent` klasörleri bu yönetim platformu yedeğine dahil edilmez. Dağıtılan uygulamaların veritabanı, volume ve kalıcı dosya içerikleri ayrıca yedeklenmelidir. Yedekler hassas veri içerdiğinden erişim izinleri kısıtlanmalı ve sunucu dışında güvenli bir kopya tutulmalıdır.
 
 Kurtarmada dosyalar aynı yollarına ve uygun sahipliklerle geri yüklenir. PostgreSQL başlatılarak döküm boş Coolify veritabanına `pg_restore` ile aktarılır; ardından Coolify ve proxy başlatılır. Aynı `APP_KEY`, şifrelenmiş değerlerin çözülebilmesi için zorunludur.
 
