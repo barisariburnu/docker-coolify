@@ -1,0 +1,52 @@
+name: coolify-proxy
+services:
+  traefik:
+    image: traefik:v3.7.16
+    container_name: coolify-proxy
+    restart: unless-stopped
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - coolify
+    ports:
+      - "127.0.0.1:18080:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /data/coolify/proxy:/traefik
+    command:
+      - --ping=true
+      - --ping.entrypoint=http
+      - --api.dashboard=false
+      - --api.insecure=false
+      - --entrypoints.http.address=:80
+      - --entrypoints.https.address=:443
+      - --entrypoints.http.http.encodequerysemicolons=true
+      - --entrypoints.https.http.encodequerysemicolons=true
+      - --entrypoints.http.forwardedheaders.trustedips=192.168.251.1/32
+      - --providers.file.directory=/traefik/dynamic/
+      - --providers.file.watch=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=coolify
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http
+      - --certificatesresolvers.letsencrypt.acme.storage=/traefik/acme.json
+    labels:
+      traefik.enable: "false"
+      coolify.managed: "true"
+      coolify.proxy: "true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+    mem_limit: 256m
+    cpus: 1
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+networks:
+  coolify:
+    external: true

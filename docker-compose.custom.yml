@@ -1,0 +1,61 @@
+# Kept separate from upstream files so upgrades retain host-specific settings.
+services:
+  coolify:
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: coolify
+      traefik.http.routers.coolify-panel.rule: "Host(`${COOLIFY_DOMAIN:?Set COOLIFY_DOMAIN in .env}`)"
+      traefik.http.routers.coolify-panel.entrypoints: http
+      traefik.http.routers.coolify-panel.priority: "100"
+      traefik.http.routers.coolify-panel.service: coolify-panel
+      traefik.http.services.coolify-panel.loadbalancer.server.port: "8080"
+      traefik.http.routers.coolify-panel-realtime.rule: "Host(`${COOLIFY_DOMAIN:?Set COOLIFY_DOMAIN in .env}`) && PathPrefix(`/app/`)"
+      traefik.http.routers.coolify-panel-realtime.entrypoints: http
+      traefik.http.routers.coolify-panel-realtime.priority: "200"
+      traefik.http.routers.coolify-panel-realtime.service: coolify-panel-realtime
+      traefik.http.services.coolify-panel-realtime.loadbalancer.server.port: "6001"
+      traefik.http.routers.coolify-panel-terminal.rule: "Host(`${COOLIFY_DOMAIN:?Set COOLIFY_DOMAIN in .env}`) && PathPrefix(`/terminal/ws`)"
+      traefik.http.routers.coolify-panel-terminal.entrypoints: http
+      traefik.http.routers.coolify-panel-terminal.priority: "200"
+      traefik.http.routers.coolify-panel-terminal.service: coolify-panel-terminal
+      traefik.http.services.coolify-panel-terminal.loadbalancer.server.port: "6002"
+      # Redirect only requests marked as external HTTP by the existing tunnel.
+      traefik.http.routers.coolify-panel-redirect.rule: "Host(`${COOLIFY_DOMAIN:?Set COOLIFY_DOMAIN in .env}`) && Header(`X-Forwarded-Proto`, `http`)"
+      traefik.http.routers.coolify-panel-redirect.entrypoints: http
+      traefik.http.routers.coolify-panel-redirect.priority: "300"
+      traefik.http.routers.coolify-panel-redirect.service: coolify-panel
+      traefik.http.routers.coolify-panel-redirect.middlewares: coolify-panel-https
+      traefik.http.middlewares.coolify-panel-https.redirectscheme.scheme: https
+      traefik.http.middlewares.coolify-panel-https.redirectscheme.permanent: "true"
+    ports: !override
+      - "127.0.0.1:8000:8080"
+      - "127.0.0.1:6001:6001"
+      - "127.0.0.1:6002:6002"
+    networks: !override
+      coolify: {}
+      coolify-internal: {}
+    mem_limit: 1536m
+    cpus: 2
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  postgres:
+    networks: !override
+      coolify-internal: {}
+    mem_limit: 512m
+    cpus: 1
+    logging: *logging
+  redis:
+    networks: !override
+      coolify-internal: {}
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+    logging: *logging
+networks:
+  coolify-internal:
+    name: coolify-internal
+    internal: true
