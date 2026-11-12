@@ -7,7 +7,8 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     networks:
-      - coolify
+      coolify:
+        gw_priority: 100
     ports:
       - "127.0.0.1:18080:80"
     volumes:

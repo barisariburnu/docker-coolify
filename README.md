@@ -37,7 +37,7 @@ Resmi Coolify Compose dosyaları kurulum sırasında `/data/coolify/source` dizi
 ## Ön koşullar
 
 - Ubuntu veya Coolify tarafından desteklenen bir Linux dağıtımı
-- Docker Engine ve Docker Compose **2.24.4 veya üzeri**
+- Docker Engine **28.0 veya üzeri** ve Docker Compose **2.33.1 veya üzeri**
 - OpenSSH, `curl`, Python 3 ve yönetici yetkisi
 - DNS yönetimi Cloudflare üzerinde bulunan bir alan adı
 - Sunucuda çalışan bir Cloudflare Tunnel konektörü
@@ -126,6 +126,8 @@ docker network create --attachable --subnet 192.168.251.0/24 coolify
 ```
 
 Ağ mevcutsa `docker network inspect coolify` ile doğrulanmalıdır. Alt ağ değiştirildiğinde SSH yetkilendirmesindeki kaynak ağı ve proxy yapılandırmasındaki güvenilen gateway adresi de güncellenmelidir. `coolify-internal` ağı Compose tarafından oluşturulur.
+
+Proxy'nin `coolify` bağlantısında `gw_priority: 100` tanımlıdır. Bu öncelik, yeni uygulama ağları bağlandığında varsayılan ağ geçidini sabit tutar; tünelden gelen HTTPS başlıklarının güvenilir gateway üzerinden işlenmesini sağlar. Öncelik kaldırılırsa panelde HTTPS yönlendirme döngüsü oluşabilir. Bu özellik için [Docker Engine 28.0](https://docs.docker.com/engine/release-notes/28/#2800) ve [Docker Compose 2.33.1](https://docs.docker.com/reference/compose-file/services/#gw_priority) veya üzeri gerekir.
 
 ### 4. Sunucu yönetimi için SSH yetkilendirmesi
 
